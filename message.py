@@ -11,8 +11,9 @@ class MessageType(IntEnum):
     # REQ_BLOCKCHAIN = 7
 
 class Message:
-    def __init__(self, round, depth, block, votes):
-        self.round = type
+    def __init__(self, type, round, depth, block):
+        self.type = type
+        self.round = round
         self.log = depth
         self.block = block
 
