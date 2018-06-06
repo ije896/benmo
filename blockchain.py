@@ -10,8 +10,9 @@ class Blockchain:
 class Block:
     def __init__(self):
         self.transactions = []
-        
+
     def addTransaction(self, transaction):
+        self.transactions.append(transaction)
         pass
 
 class Transaction:

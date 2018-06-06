@@ -3,9 +3,6 @@ import queue as q
 from blockchain import *
 from message import *
 
-# highest proposed round num
-# expected value
-
 class Node:
     def __init__(self, id):
         self.id = id
@@ -60,7 +57,7 @@ class Node:
 
     def prepareHandler(self, conn, message):
         if message.round <= self.round:
-            #nack
+            # nack
             pass
         if message.depth <= self.blockchain.depth:
             # nack
@@ -68,15 +65,47 @@ class Node:
         if self.acceptedValue:
             # send promise with value
             pass
-        # send promise
+        # send promise w/o value
         pass
 
 
     def promiseHandler(self, conn, message):
-        pass
+        self.promises++ # member variable?
+        if self.promises >= majority:
+            # close promise handle
+            # broadcast accept
+            pass
+
     def acceptHandler(self, conn, message):
+        if message.round <= self.round:
+            # nack
+            pass
+        if message.depth <= self.blockchain.depth:
+            # nack
+            pass
+        self.acceptedValue = message.value
+        # broadcast accepted
         pass
+
     def acceptedHandler(self, conn, message):
+        if self.state = PROPOSER:
+            self.acceptances++ # member variable?
+            if self.acceptances >= majority:
+                # reset acceptances, promises
+                self.queue = q.Queue()
+                # add block to blockchain
+                # broadcast decision
+                pass
+            pass
         pass
+
     def decisionHandler(self, conn, message):
+        if message.round <= self.round:
+            # nack
+            pass
+        if message.depth <= self.blockchain.depth:
+            # nack
+            pass
+        # add block to blockchain
+        # reset vars
         pass
