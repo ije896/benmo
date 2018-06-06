@@ -13,7 +13,7 @@ class Node:
         self.blockchain = Blockchain()
         self.balance = 100
         self.round = 0
-        self.accepted = None
+        self.accepted_value = None
 
     def startInput(self):
         pass
@@ -42,17 +42,41 @@ class Node:
             data = conn.recv(buffer_size)
             message = m.decode_message(data)
             if message.type == PREPARE:
-                pass
+                startWorker(self.prepareHandler, conn, message)
             elif message.type == PROMISE:
-                pass
+                startWorker(self.promiseHandler, conn, message)
             elif message.type == ACCEPT:
-                pass
+                startWorker(self.acceptHandler, conn, message)
             elif message.type == ACCEPTED:
-                pass
+                startWorker(self.acceptedHandler, conn, message)
             elif message.type == DECISION:
-                pass
+                startWorker(self.decisionHandler, conn, message)
 
-            thread = Thread(target=self.process_message, args=(conn, ))
-            tname = thread.getName()
-            thread.daemon = True
-            thread.start()
+    def startWorker(self, target, conn, message):
+        thread = Thread(target=target, args=(conn, message, ))
+        tname = thread.getName()
+        thread.daemon = True
+        thread.start()
+
+    def prepareHandler(self, conn, message):
+        if message.round <= self.round:
+            #nack
+            pass
+        if message.depth <= self.blockchain.depth:
+            # nack
+            pass
+        if self.acceptedValue:
+            # send promise with value
+            pass
+        # send promise
+        pass
+
+
+    def promiseHandler(self, conn, message):
+        pass
+    def acceptHandler(self, conn, message):
+        pass
+    def acceptedHandler(self, conn, message):
+        pass
+    def decisionHandler(self, conn, message):
+        pass
