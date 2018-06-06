@@ -7,15 +7,14 @@ class MessageType(IntEnum):
     ACCEPT = 2
     ACCEPTED = 3
     DECISION = 4
-    # NACK = 6
+    NACK = 6
     # REQ_BLOCKCHAIN = 7
 
 class Message:
-    def __init__(self, type, log, time_table, votes):
-        self.type = type
-        self.log = log
-        self.time_table = time_table
-        self.votes = votes
+    def __init__(self, round, depth, block, votes):
+        self.round = type
+        self.log = depth
+        self.block = block
 
 def generate_request(action, type, quantity, kiosk_id):
     return {"action": action,

@@ -5,7 +5,8 @@ class Blockchain:
         self.depth = 0
 
     def addBlock(self, block):
-        pass
+        self.blocks.append(block)
+        self.depth += 1
 
 class Block:
     def __init__(self):
@@ -13,7 +14,6 @@ class Block:
 
     def addTransaction(self, transaction):
         self.transactions.append(transaction)
-        pass
 
 class Transaction:
     def __init__(self, amount, debit_node, credit_node):

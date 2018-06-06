@@ -2,32 +2,54 @@
 import queue as q
 from blockchain import *
 from message import *
+import time, socket, os, sys
 
 class Node:
     def __init__(self, id):
         self.id = id
-        self.queue = q.Queue()
+        self.queue = q.Queue(10)
         self.blockchain = Blockchain()
         self.balance = 100
         self.round = 0
-        self.accepted_value = None
+        self.accepted_block = None
 
     def startInput(self):
-        pass
+        action = input('Enter a command (send/print): ').lower().strip()
+        if action=='send':
+            amount = int(input('Enter an amount: ').lower().strip())
+            credit_node = input('Enter destination for transaction(1-5): ').lower().strip() # maybe also int for enum?
+            self.moneyTransfer(amount, credit_node)
+        if action=='print':
+            self.printAll()
 
     def moneyTransfer(self, amount, credit_node):
-        # if credit is high enough
-        trans = Transaction(amount, self.id, credit_node)
-        self.queue.put(trans)
+        if self.balance>amount:
+            trans = Transaction(amount, self.id, credit_node)
+            self.queue.put(trans)
+        else:
+            print("Insufficient funds")
+
+    def checkQueuePerUnitTime(self, time_in_seconds):
+        while True:
+            if not self.queue.empty(): # and you're not already in proposal state
+                # start proposal phase
+                pass
+            time.sleep(time_in_seconds)
+
+    def printAll(self):
+        self.printBalance()
+        self.printQueue()
+        self.printBlockchain()
 
     def printBlockchain(self):
-        pass
+        print("Node blockchain: ", self.blockchain)
 
     def printBalance(self):
-        pass
+        print("Node balance: ", self.balance)
 
     def printQueue(self):
-        pass
+        l = list(self.queue)
+        print("Node queue: ", l)
 
     def startListening(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -62,19 +84,19 @@ class Node:
         if message.depth <= self.blockchain.depth:
             # nack
             pass
-        if self.acceptedValue:
-            # send promise with value
+        if self.accepted_block:
+            # send promise with block
             pass
         # send promise w/o value
         pass
 
 
     def promiseHandler(self, conn, message):
-        self.promises++ # member variable?
+        self.promises+=1 # member variable?
         if self.promises >= majority:
-            # close promise handle
             # broadcast accept
             pass
+        pass
 
     def acceptHandler(self, conn, message):
         if message.round <= self.round:
@@ -83,17 +105,17 @@ class Node:
         if message.depth <= self.blockchain.depth:
             # nack
             pass
-        self.acceptedValue = message.value
+        self.accepted_block = message.block
         # broadcast accepted
         pass
 
     def acceptedHandler(self, conn, message):
-        if self.state = PROPOSER:
-            self.acceptances++ # member variable?
+        if True: # ACTUALLY --> self.state = PROPOSER:
+            self.acceptances+=1 # member variable?
             if self.acceptances >= majority:
                 # reset acceptances, promises
                 self.queue = q.Queue()
-                # add block to blockchain
+                self.updateFromBlock(self.accepted_block) # SHOULD be the proposed block
                 # broadcast decision
                 pass
             pass
@@ -106,6 +128,20 @@ class Node:
         if message.depth <= self.blockchain.depth:
             # nack
             pass
-        # add block to blockchain
+        self.updateFromBlock(self.accepted_block, message.depth)
         # reset vars
+        pass
+
+    def sendMessage(self, message):
+        pass
+    def broadcast(self, message):
+        pass
+
+    def updateFromBlock(self, block, depth):
+        self.blockchain.addBlock(block)
+        for trans in len(self.blockchain[depth].transactions):
+            if trans.credit_node == self.id:
+                self.balance+=trans.amount
+            if trans.debit_node == self.id:
+                self.balance-=trans.amount
         pass
