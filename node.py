@@ -10,19 +10,19 @@ from config import *
 
 
 # TODO: is majority a const, 3, or is it dynamic as nodes go on/offline
-# TODO: if dynamic, do we let the other nodes know when one goes offline/alrt for changes in cluster size?
+# TODO: if dynamic, do we let the other nodes know when one goes offline/alert for changes in cluster size?
 MAJORITY = 3
 
 
 class Node:
-    def __init__(self, id, ip=None, port=None):
+    def __init__(self, id):
         self.id = id
         self.queue = q.Queue(10)
         self.blockchain = Blockchain()
         self.balance = 100
 
-        self.ip = ip
-        self.port = port
+        self.ip = ip_addrs[id]
+        self.port = ports[id]
 
         self.latest_round = 0
 
@@ -148,6 +148,7 @@ class Node:
 
         self.accepted_block = message.block
         # broadcast accepted
+        conn.close()
         accepted = m.Message(mt.ACCEPTED)
         self.broadcast_message(accepted)
 
@@ -166,6 +167,8 @@ class Node:
                                      block=self.proposed_block
                                      )
 
+                conn.close()
+                self.broadcast_message(decision)
                 self.reset_proposer_state()
 
 
@@ -181,6 +184,7 @@ class Node:
             return
         self.updateFromBlock(message.block, message.depth)
         self.reset_acceptor_state()
+        conn.close()
 
 
 
