@@ -13,6 +13,7 @@ from config import *
 # TODO: is majority a const, 3, or is it dynamic as nodes go on/offline
 # TODO: if dynamic, do we let the other nodes know when one goes offline/alert for changes in cluster size?
 MAJORITY = 2
+NUM_NODES = 3
 
 # Proposer phase
 class pp(IntEnum):
@@ -21,6 +22,10 @@ class pp(IntEnum):
     ACCEPT = 2
     DECISION = 3
 
+class qs(IntEnum):
+    EMPTY = 0
+    NONEMPTY = 1
+
 # Acceptor phase
 # TODO: Should acceptor phases be a key value for id-phase? can you be in different phases w.r.t. different proposers?
 class ap(IntEnum):
@@ -28,9 +33,14 @@ class ap(IntEnum):
     PROMISE = 1
     ACCEPTED = 2
 
+# Node phase
+class np(IntEnum):
+    OFFLINE = 0
+    ONLINE = 1
+
 
 class Node:
-    def __init__(self, id):
+    def __init__(self, id, propose_cooldown=7):
         self.id = id
         self.queue = q.Queue(10)
         self.blockchain = Blockchain()
@@ -53,18 +63,37 @@ class Node:
         self.proposed_block = None
         self.proposer_phase = pp.NONE
 
+        self.propose_cooldown = propose_cooldown
+
+        self.queue_state = qs.EMPTY
+
+        self.listen_socket = None
+
+        self.startListeningThread()
+        self.startInput()
+
 
     def startInput(self):
-        action = input('Enter a command (send/print): ').lower().strip()
-        if action=='send':
-            amount = int(input('Enter an amount: ').lower().strip())
-            credit_node = input('Enter destination for transaction(1-5): ').lower().strip() # maybe also int for enum?
-            self.moneyTransfer(amount, credit_node)
-        if action=='print':
-            self.print_all()
+        while (True):
+            action = input('Enter a command (send/print): ').lower().strip()
+            if action=='send':
+                amount = int(input('Enter an amount: ').lower().strip())
+                credit_node = input('Enter destination for transaction(1-5): ').lower().strip() # maybe also int for enum?
+                self.moneyTransfer(amount, credit_node)
+            if action=='print':
+                self.print_all()
+            if action=='safe close':
+                self.listen_socket.close()
+                exit(0)
+
 
     def moneyTransfer(self, amount, credit_node):
         if self.balance>amount:
+
+            if self.queue.qsize() == 0:
+                self.queue_state = qs.NONEMPTY
+                self.start_proposer_loop_thread()
+
             trans = Transaction(amount, self.id, credit_node)
             self.queue.put(trans)
         else:
@@ -89,15 +118,24 @@ class Node:
         print("Node balance: ", self.balance)
 
     def print_queue(self):
-        l = list(self.queue)
+        l = self.queue_to_list(self.queue)
         print("Node queue: ", l)
 
 
+    def startListeningThread(self):
+        thread = Thread(target=self.startListening, args=())
+        tname = thread.getName()
+        thread.daemon = True
+        thread.start()
 
     def startListening(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.bind((self.ip, self.port))
         s.listen(5)
+
+        self.listen_socket = s
+
+        print("Now listening on ip: %s and port: %d" % (self.ip, self.port))
 
         while True:
             conn, addr = s.accept()
@@ -136,25 +174,25 @@ class Node:
 
     def rcv_prepare(self, conn, message):
         if message.round <= self.latest_round:
-            nack = m.Message(mt.NACK)
+            nack = m.Message(mt.NACK, target_id=message.sender_id)
             self.send_message(conn, nack)
             return
 
         if message.depth <= self.blockchain.depth:
-            nack = m.Message(mt.NACK)
+            nack = m.Message(mt.NACK, target_id=message.sender_id)
             self.send_message(conn, nack)
             return
 
         if self.accepted_block:
             # send promise with block
-            promise = m.Message(mt.PROMISE)
+            promise = m.Message(mt.PROMISE, target_id=message.sender_id)
             self.send_message(conn, promise)
             return
 
         self.latest_round = message.round
 
         # send promise w/o value
-        promise = m.Message(mt.PROMISE)
+        promise = m.Message(mt.PROMISE, target_id=message.sender_id)
         self.send_message(conn, promise)
 
 
@@ -230,6 +268,7 @@ class Node:
     """
 
     def send_prepare(self):
+        print("Sending PREPARE")
         self.proposed_round = self.latest_round + 1
         self.proposed_depth = self.blockchain.depth + 1
         self.proposed_block = self.queue_to_list(self.queue)
@@ -244,22 +283,42 @@ class Node:
         self.broadcast_message(prepare)
 
 
+    def proposer_loop(self):
+        while (self.queue_state == qs.NONEMPTY):
+            if (self.proposer_phase == pp.NONE):
+                self.send_prepare()
+            time.sleep(self.propose_cooldown)
+        return
+
+    def start_proposer_loop_thread(self):
+        thread = Thread(target=self.proposer_loop, args=())
+        tname = thread.getName()
+        thread.daemon = True
+        thread.start()
+
+
     """
     Utility Methods
     """
 
     def send_message(self, conn, message):
         message.sender_id = self.id
+        print("\nAttempting message send from %d to %d" % (message.sender_id, message.target_id))
+        print("\n",conn.getsockname())
+        print("\n",conn.getpeername(),"\n")
         message = m.encode_message(message)
         conn.send(message)
         conn.close()
 
     def broadcast_message(self, message):
-        for i in range(len(ip_addrs)):
+        # for i in range(len(ip_addrs)):
+        for i in range(NUM_NODES):
             if not i == self.id:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.connect((ip_addrs[i], ports[i]))
+                message.target_id = i
                 self.send_message(sock, message)
+        print("Broadcast complete")
 
     def updateFromBlock(self, block, depth):
         self.blockchain.addBlock(block)
@@ -276,6 +335,7 @@ class Node:
         self.promises = 0
         self.proposed_block = None
         self.queue = q.Queue()
+        self.queue_state = qs.EMPTY
 
     def reset_acceptor_state(self):
         self.accepted_block = None
@@ -285,3 +345,6 @@ class Node:
         while queue.qsize() > 0:
             l.append(queue.get())
         return l
+
+
+n = Node(int(sys.argv[1]))

@@ -11,15 +11,16 @@ class MessageType(IntEnum):
     # REQ_BLOCKCHAIN = 7
 
 class Message:
-    def __init__(self, type, ip=None, port=None, round=None, depth=None, block=None, proposer_id=None, sender_id=None):
+    def __init__(self, type, ip=None, port=None, round=None, depth=None, block=None, proposer_id=None, sender_id=None, target_id=None):
         self.type = type
         self.ip = ip
         self.port = port
         self.round = round
-        self.log = depth
+        self.depth = depth
         self.block = block
         self.proposer_id = proposer_id
         self.sender_id = sender_id
+        self.target_id = target_id
 
 def encode_message(message):
     return pickle.dumps(message)
