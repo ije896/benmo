@@ -5,13 +5,28 @@ import message as m
 import time, socket, os, sys
 from threading import Thread
 from message import MessageType as mt
+from enum import IntEnum
 
 from config import *
 
 
 # TODO: is majority a const, 3, or is it dynamic as nodes go on/offline
 # TODO: if dynamic, do we let the other nodes know when one goes offline/alert for changes in cluster size?
-MAJORITY = 3
+MAJORITY = 2
+
+# Proposer phase
+class pp(IntEnum):
+    NONE = 0
+    PREPARE = 1
+    ACCEPT = 2
+    DECISION = 3
+
+# Acceptor phase
+# TODO: Should acceptor phases be a key value for id-phase? can you be in different phases w.r.t. different proposers?
+class ap(IntEnum):
+    NONE = 0
+    PROMISE = 1
+    ACCEPTED = 2
 
 
 class Node:
@@ -28,6 +43,7 @@ class Node:
 
         # state for acceptor phase -- resets after a decision is received
         self.accepted_block = None
+        self.acceptor_phase = ap.NONE
 
         # state for proposer phase -- resets after decision is sent
         self.promises = 0
@@ -35,6 +51,7 @@ class Node:
         self.proposed_depth = 0
         self.proposed_round = 0
         self.proposed_block = None
+        self.proposer_phase = pp.NONE
 
 
     def startInput(self):
@@ -87,16 +104,22 @@ class Node:
             data = conn.recv(BUFFER_SIZE)
             message = m.decode_message(data)
             if message.type == mt.PREPARE:
+                print("received PREPARE from id: %d" % (message.sender_id))
                 self.startWorker(self.rcv_prepare, conn, message)
             elif message.type == mt.PROMISE:
+                print("received PROMISE from id: %d" % (message.sender_id))
                 self.startWorker(self.rcv_promise, conn, message)
             elif message.type == mt.ACCEPT:
+                print("received ACCEPT from id: %d" % (message.sender_id))
                 self.startWorker(self.rcv_accept, conn, message)
             elif message.type == mt.ACCEPTED:
+                print("received ACCEPTED from id: %d" % (message.sender_id))
                 self.startWorker(self.rcv_acceptance, conn, message)
             elif message.type == mt.DECISION:
+                print("received DECISION from id: %d" % (message.sender_id))
                 self.startWorker(self.rcv_decision, conn, message)
             elif message.type == mt.NACK:
+                print("received NACK from id: %d" % (message.sender_id))
                 self.startWorker(self.rcv_nack, conn, message)
 
 
@@ -139,6 +162,7 @@ class Node:
         self.promises+=1 # member variable?
         if self.promises >= MAJORITY:
             # broadcast accept
+            self.proposer_phase = pp.ACCEPT
             conn.close()
             accept = m.Message(mt.ACCEPT)
             self.broadcast_message(accept)
@@ -166,6 +190,7 @@ class Node:
         if message.proposer_id == self.id:
             self.acceptances += 1
             if self.acceptances >= MAJORITY:
+                self.proposer_phase = pp.DECISION
                 # TODO: implement buffer queue for transactions entered after proposer phase begins
                 self.updateFromBlock(self.proposed_block, self.proposed_depth)
 
@@ -209,6 +234,8 @@ class Node:
         self.proposed_depth = self.blockchain.depth + 1
         self.proposed_block = self.queue_to_list(self.queue)
 
+        self.proposer_phase = pp.PREPARE
+
         prepare = m.Message(mt.PREPARE,
                             proposer_id=self.id,
                             round=self.proposed_round,
@@ -222,6 +249,7 @@ class Node:
     """
 
     def send_message(self, conn, message):
+        message.sender_id = self.id
         message = m.encode_message(message)
         conn.send(message)
         conn.close()
