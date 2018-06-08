@@ -456,7 +456,13 @@ class Node:
         return l
 
     def save_state(self):
+        # out = []
+        # out.append(self.queue_to_list(self.queue))
+        # out.append(self.blockchain)
+        # out.append(self.balance)
+
         with open(self.fname, 'wb') as w:
+          # pickle.dump(out , w)
           pickle.dump(self.output_self_to_object(), w)
           w.close()
 
@@ -464,7 +470,7 @@ class Node:
         # obj = Node(self.id, run=False)
         obj = empty()
         obj.id = self.id
-        obj.queue = self.queue
+        obj.queue = self.queue_to_list(self.queue)
         obj.blockchain = self.blockchain
         obj.balance = self.balance
         obj.balance_after_queue = self.balance_after_queue
@@ -498,7 +504,7 @@ class Node:
     def load_from_file(self):
         with open(self.fname, 'rb') as r:
             node_data = pickle.load(r)
-            self.queue = node_data.queue
+            self.queue = copy.deepcopy(self.list_to_queue(node_data.queue))
             self.blockchain = node_data.blockchain
             self.balance = node_data.balance
             self.balance_after_queue = node_data.balance_after_queue
@@ -515,6 +521,11 @@ class Node:
             if (not self.proposer_phase == pp.NONE):
                 self.start_proposer_loop_thread()
 
+    def list_to_queue(self, list):
+        qu = q.Queue()
+        for item in list:
+            qu.put(item)
+        return qu
 
 class empty(object):
     pass
