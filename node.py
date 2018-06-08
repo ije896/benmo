@@ -1,3 +1,14 @@
+## READ ##
+# ISSUES: so, the proposer loop is so specific that it gets stuck in that
+# loop whenever you restart from a proposer state that's not NONE
+
+# but it still gets stuck in a weird phase, appends duplicate transactions to the queue,
+# and doesn't clear queue after broadcasting decision after load from save
+
+# we also don't handle our error cases for connections. eg, a node crashes, so
+# other connections will be refused and the connection loop crashes, and never really
+# reconnects. So load from crash doesn't really work.
+
 # Node class
 import queue as q
 from blockchain import *
@@ -90,12 +101,12 @@ class Node:
 
     def startInput(self):
         while (True):
-            action = input('Enter a command (s/p/sc): ').lower().strip()
+            action = input('Enter a command (s/p/sc/l): ').lower().strip()
             if action=='s':
                 amount = int(input('Enter an amount: ').lower().strip())
                 credit_node = ""
                 while (credit_node == ""):
-                    credit_node = int(input('Enter destination for transaction(1-5): ').lower().strip())
+                    credit_node = int(input('Enter destination for transaction(0-4): ').lower().strip())
                     if (credit_node not in range(NUM_NODES)):
                         print("Destination not valid.")
                         credit_node = ""
@@ -126,7 +137,7 @@ class Node:
 
             self.save_state()
 
-            if self.queue.qsize() == 1:
+            if self.queue.qsize() >= 1:
                 self.queue_state = qs.NONEMPTY
                 self.start_proposer_loop_thread()
         else:
@@ -296,8 +307,6 @@ class Node:
                 print("\nMajority Acceptance; executing decision")
                 self.proposer_phase = pp.DECISION
                 # TODO: implement buffer queue for transactions entered after proposer phase begins
-                self.updateFromBlock(self.proposed_block, self.proposed_depth)
-
                 decision = m.Message(mt.DECISION,
                                      sender_id=self.id,
                                      proposer_id=self.id,
@@ -305,6 +314,7 @@ class Node:
                                      round=self.proposed_round,
                                      block=self.proposed_block
                                      )
+                self.updateFromBlock(self.proposed_block, self.proposed_depth)
 
                 conn.close()
                 self.broadcast_message(decision)
@@ -371,7 +381,8 @@ class Node:
     def proposer_loop(self):
         while (True):
             time.sleep(self.propose_cooldown)
-            if (self.queue_state == qs.NONEMPTY):
+            # if (self.queue_state == qs.NONEMPTY):
+            if (not self.queue.empty()):
                 print("\nRestarted proposer loop, id: %d, pphase: %d" % (self.id, self.proposer_phase))
                 if (self.proposer_phase == pp.NONE):
                     self.send_prepare()
@@ -508,12 +519,30 @@ class Node:
             exit(0)
 
         self.initialize()
-        self.queue_state = node_data.queue_state
+        # self.queue_state = node_data.queue_state  # this doesn't give it the true state, queue is non empty but it never executes
+        if not self.queue.empty():
+            self.queue_state = qs.NONEMPTY
+        else:
+            self.queue_state = qs.EMPTY
 
         # self.startListeningThread()
 
         # self.proposer_phase = node_data.proposer_phase
-        # if (not self.proposer_phase == pp.NONE):
+        # if (self.proposer_phase == pp.DECISION):
+        #
+        # if (self.proposer_phase == pp.NONE or self.proposer_phase == pp.PREPARE or self.proposer_phase == pp.ACCEPT):
+        #     self.proposer_phase = pp.NONE
+
+        ## READ ##
+        # ISSUES: so, the proposer loop is so specific that it gets stuck in that
+        # loop whenever you restart from a proposer state that's not NONE
+
+        # but it still gets stuck in a weird phase, appends duplicates to the queue,
+        # and doesn't clear queue after broadcasting decision after load from save
+
+        # we also don't handle our error cases for connections. eg, a node crashes, so
+        # other connections will be refused and the connection loop crashes, and never really
+        # reconnects
         self.start_proposer_loop_thread()
 
     def list_to_queue(self, list):
