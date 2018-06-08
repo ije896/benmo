@@ -6,14 +6,16 @@ import time, socket, os, sys
 from threading import Thread
 from message import MessageType as mt
 from enum import IntEnum
+import random
+import copy
 
 from config import *
 
 
 # TODO: is majority a const, 3, or is it dynamic as nodes go on/offline
 # TODO: if dynamic, do we let the other nodes know when one goes offline/alert for changes in cluster size?
-MAJORITY = 2
-NUM_NODES = 3
+MAJORITY = 3
+NUM_NODES = 5
 
 # Proposer phase
 class pp(IntEnum):
@@ -124,7 +126,7 @@ class Node:
         print("\nState of node %d : pp: %d, qp: %d" % (self.id, self.proposer_phase, self.queue_state))
 
     def print_blockchain(self):
-        print("Node blockchain: ", self.blockchain.print())
+        print("Node blockchain: %s" % self.blockchain.print_str())
 
     def print_balance(self):
         print("Node balance: ", self.balance)
@@ -155,7 +157,8 @@ class Node:
             message = m.decode_message(data)
 
             if message.type == mt.PREPARE:
-                print("received PREPARE from id: %d, prop round: %d, prop depth: %d" % (message.sender_id, message.round, message.depth))
+                print("received PREPARE from id: %d, prop round: %d, prop depth: %d, prop block length: %d" %
+                      (message.sender_id, message.round, message.depth, len(message.block)))
                 self.startWorker(self.rcv_prepare, conn, message)
             elif message.type == mt.PROMISE:
                 print("received PROMISE from id: %d" % (message.sender_id))
@@ -169,7 +172,7 @@ class Node:
             elif message.type == mt.DECISION:
                 print("received DECISION from id: %d" % (message.sender_id))
                 self.startWorker(self.rcv_decision, conn, message)
-            elif message.type == mt.NACK:
+            elif message.type == mt.NACK or message.type == mt.ROUND_NACK or message.type == mt.DEPTH_NACK:
                 print("received NACK from id: %d" % (message.sender_id))
                 self.startWorker(self.rcv_nack, conn, message)
 
@@ -188,20 +191,29 @@ class Node:
     def rcv_prepare(self, conn, message):
         target_id = message.sender_id
         if message.round <= self.latest_round:
-            nack = m.Message(mt.NACK, target_id=message.sender_id, comment="prepare nack, round is too low")
+            nack = m.Message(mt.ROUND_NACK,
+                             target_id=message.sender_id,
+                             round=self.latest_round,
+                             comment="prepare nack, round is too low")
             # self.send_message(conn, nack)
             self.send_message_to_id(target_id, nack)
             return
 
         if message.depth <= self.blockchain.depth:
-            nack = m.Message(mt.NACK, target_id=message.sender_id, comment="prepare nack, depth is too low")
+            nack = m.Message(mt.DEPTH_NACK,
+                             target_id=message.sender_id,
+                             depth=self.blockchain.depth,
+                             blockchain=self.blockchain,
+                             comment="prepare nack, depth is too low")
             # self.send_message(conn, nack)
             self.send_message_to_id(target_id, nack)
             return
 
         if self.accepted_block:
-            # send promise with block
-            promise = m.Message(mt.PROMISE, target_id=message.sender_id)
+            # TODO: send promise with block
+            promise = m.Message(mt.PROMISE,
+                                blockchain=self.blockchain,
+                                target_id=message.sender_id)
             # self.send_message(conn, promise)
             self.send_message_to_id(target_id, promise)
             return
@@ -215,6 +227,7 @@ class Node:
 
 
     def rcv_promise(self, conn, message):
+        # TODO: If value is appended to promise...
         if self.proposer_phase == pp.PREPARE:
             self.promises+=1 # member variable?
             if self.promises >= MAJORITY:
@@ -233,13 +246,19 @@ class Node:
     def rcv_accept(self, conn, message):
         target_id = message.sender_id
         if message.round < self.latest_round:
-            nack = m.Message(mt.NACK, comment="accept nack, round is too low")
+            nack = m.Message(mt.ROUND_NACK,
+                             round=self.latest_round,
+                             comment="accept nack, round is too low")
             # self.send_message(conn, nack)
             self.send_message_to_id(target_id, nack)
             return
 
         if message.depth <= self.blockchain.depth:
-            nack = m.Message(mt.NACK, comment="accept nack, depth is too low")
+            nack = m.Message(mt.DEPTH_NACK,
+                             target_id=message.sender_id,
+                             depth=self.blockchain.depth,
+                             blockchain=self.blockchain,
+                             comment="prepare nack, depth is too low")
             # self.send_message(conn, nack)
             self.send_message_to_id(target_id, nack)
             return
@@ -299,14 +318,24 @@ class Node:
 
 
     def rcv_nack(self, conn, message):
+        # TODO: Handle double nack case where it would bump up round number twice
         print("\nnack received: %s" % message.comment)
         conn.close()
+
+        if (message.type == mt.DEPTH_NACK):
+            self.blockchain = message.blockchain
+        elif (message.type == mt.ROUND_NACK):
+            self.latest_round = message.round
+
+        if (not self.proposer_phase == pp.NONE):
+            self.proposer_phase = pp.NONE
 
     """
     Proposer Logic
     """
 
     def send_prepare(self):
+        # self.latest_round += 1
         self.proposed_round = self.latest_round + 1
         self.proposed_depth = self.blockchain.depth + 1
         # print(self.proposed_block)
@@ -315,7 +344,7 @@ class Node:
 
         self.proposer_phase = pp.PREPARE
 
-        print("\nSending PREPARE, round: %d, depth: %d" % (self.proposed_round, self.proposed_depth))
+        print("\nSending PREPARE, round: %d, depth: %d, length of block: %d" % (self.proposed_round, self.proposed_depth, len(self.proposed_block)))
 
         prepare = m.Message(mt.PREPARE,
                             sender_id=self.id,
@@ -355,6 +384,7 @@ class Node:
         self.send_message(sock, message)
 
     def send_message(self, conn, message):
+        time.sleep(random.random() * 1.5)
         message.sender_id = self.id
         # print("\nAttempting message send from %d to %d" % (message.sender_id, message.target_id))
         # print("\n",conn.getsockname())
@@ -397,9 +427,11 @@ class Node:
         self.accepted_block = None
 
     def queue_to_list(self, queue):
+        temp_q = q.Queue()
+        temp_q.queue = copy.deepcopy(queue.queue)
         l = []
-        while queue.qsize() > 0:
-            l.append(queue.get())
+        while temp_q.qsize() > 0:
+            l.append(temp_q.get())
         return l
 
 

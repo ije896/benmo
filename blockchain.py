@@ -14,6 +14,14 @@ class Blockchain:
             for j in range(len(self.blocks[i])):
                 print("\nTrans %d: %s" % (j, self.blocks[i][j].print_str()))
 
+    def print_str(self):
+        str = ""
+        for i in range(len(self.blocks)):
+            str += ("\nPrinting block %d" % i)
+            for j in range(len(self.blocks[i])):
+                str += ("\nTrans %d: %s" % (j, self.blocks[i][j].print_str()))
+        return str
+
 
 class Block:
     def __init__(self):
