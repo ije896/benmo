@@ -96,6 +96,9 @@ class Node:
                 self.startWorker(self.rcv_acceptance, conn, message)
             elif message.type == mt.DECISION:
                 self.startWorker(self.rcv_decision, conn, message)
+            elif message.type == mt.NACK:
+                self.startWorker(self.rcv_nack, conn, message)
+
 
     def startWorker(self, target, conn, message):
         thread = Thread(target=target, args=(conn, message, ))
@@ -103,6 +106,10 @@ class Node:
         thread.daemon = True
         thread.start()
 
+
+    """
+    Acceptor Logic
+    """
 
     def rcv_prepare(self, conn, message):
         if message.round <= self.latest_round:
@@ -120,6 +127,8 @@ class Node:
             promise = m.Message(mt.PROMISE)
             self.send_message(conn, promise)
             return
+
+        self.latest_round = message.round
 
         # send promise w/o value
         promise = m.Message(mt.PROMISE)
@@ -187,21 +196,30 @@ class Node:
         conn.close()
 
 
+    def rcv_nack(self, conn, message):
+        print("nack received")
+        conn.close()
 
-    def sendMessage(self, message, ip, port):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    """
+    Proposer Logic
+    """
 
-        # time.sleep(SLEEP_TIME)
-        sock.connect((ip, port))
-        # print("Was able to send message: ", message)
-        message = m.encode_message(message)
-        sock.send(message)
+    def send_prepare(self):
+        self.proposed_round = self.latest_round + 1
+        self.proposed_depth = self.blockchain.depth + 1
+        self.proposed_block = self.queue_to_list(self.queue)
 
-        # data = sock.recv(BUFFER_SIZE)
-        sock.close()
-        # print("Server %d SENT an update" )
-        pass
+        prepare = m.Message(mt.PREPARE,
+                            proposer_id=self.id,
+                            round=self.proposed_round,
+                            depth=self.proposed_depth,
+                            block=self.proposed_block)
+        self.broadcast_message(prepare)
 
+
+    """
+    Utility Methods
+    """
 
     def send_message(self, conn, message):
         message = m.encode_message(message)
@@ -233,3 +251,9 @@ class Node:
 
     def reset_acceptor_state(self):
         self.accepted_block = None
+
+    def queue_to_list(self, queue):
+        l = []
+        while queue.qsize() > 0:
+            l.append(queue.get())
+        return l
