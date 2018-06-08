@@ -8,6 +8,7 @@ from message import MessageType as mt
 from enum import IntEnum
 import random
 import copy
+import pickle
 
 from config import *
 
@@ -42,15 +43,29 @@ class np(IntEnum):
 
 
 class Node:
-    def __init__(self, id, propose_cooldown=7):
+    def __init__(self, id, propose_cooldown=7, load_from_save=False, run=True):
         self.id = id
         self.queue = q.Queue(10)
         self.blockchain = Blockchain()
         self.balance = 100
         self.balance_after_queue = 100
 
-        self.ip = ip_addrs[id]
-        self.port = ports[id]
+        self.fname = "node_%d_snapshot.pkl" % id
+
+        if load_from_save and run:
+            self.load_from_file()
+
+        self.propose_cooldown = propose_cooldown
+
+        self.initialize()
+
+        if run:
+            self.startListeningThread()
+            self.startInput()
+
+    def initialize(self):
+        self.ip = ip_addrs[self.id]
+        self.port = ports[self.id]
 
         self.latest_round = 0
 
@@ -66,14 +81,11 @@ class Node:
         self.proposed_block = None
         self.proposer_phase = pp.NONE
 
-        self.propose_cooldown = propose_cooldown
-
         self.queue_state = qs.EMPTY
 
         self.listen_socket = None
 
-        self.startListeningThread()
-        self.startInput()
+
 
 
     def startInput(self):
@@ -91,8 +103,14 @@ class Node:
             if action=='p':
                 self.print_all()
             if action=='sc':
+                self.save_state()
                 self.listen_socket.close()
                 exit(0)
+            if action=='l':
+                self.load_from_file()
+
+            if action=='save':
+                self.save_state()
 
 
     def moneyTransfer(self, amount, credit_node):
@@ -105,6 +123,8 @@ class Node:
 
             trans = Transaction(amount, self.id, credit_node)
             self.queue.put(trans)
+
+            self.save_state()
 
             if self.queue.qsize() == 1:
                 self.queue_state = qs.NONEMPTY
@@ -413,6 +433,7 @@ class Node:
                 self.balance_after_queue += trans.amount
             if trans.debit_node == self.id:
                 self.balance-=trans.amount
+        self.save_state()
 
 
     def reset_proposer_state(self):
@@ -433,6 +454,70 @@ class Node:
         while temp_q.qsize() > 0:
             l.append(temp_q.get())
         return l
+
+    def save_state(self):
+        with open(self.fname, 'wb') as w:
+          pickle.dump(self.output_self_to_object(), w)
+          w.close()
+
+    def output_self_to_object(self):
+        # obj = Node(self.id, run=False)
+        obj = empty()
+        obj.id = self.id
+        obj.queue = self.queue
+        obj.blockchain = self.blockchain
+        obj.balance = self.balance
+        obj.balance_after_queue = self.balance_after_queue
+        obj.fname = self.fname
+
+        obj.propose_cooldown = self.propose_cooldown
+
+        obj.ip = self.ip
+        obj.port = self.port
+
+        obj.latest_round = self.latest_round
+
+        # state for acceptor phase -- resets after a decision is received
+        obj.accepted_block = self.accepted_block
+        obj.acceptor_phase = self.acceptor_phase
+
+        # state for proposer phase -- resets after decision is sent
+        obj.promises = self.promises
+        obj.acceptances = self.acceptances
+        obj.proposed_depth = self.proposed_depth
+        obj.proposed_round = self.proposed_round
+        obj.proposed_block = self.proposed_block
+        obj.proposer_phase = self.proposer_phase
+
+        obj.queue_state = self.queue_state
+
+        obj.listen_socket = self.listen_socket
+
+        return obj
+
+    def load_from_file(self):
+        with open(self.fname, 'rb') as r:
+            node_data = pickle.load(r)
+            self.queue = node_data.queue
+            self.blockchain = node_data.blockchain
+            self.balance = node_data.balance
+            self.balance_after_queue = node_data.balance_after_queue
+
+            if (not self.id == node_data.id):
+                print("Node id was not set correctly on init")
+                exit(0)
+
+            self.initialize()
+
+            self.startListeningThread()
+
+            self.proposer_phase = node_data.proposer_phase
+            if (not self.proposer_phase == pp.NONE):
+                self.start_proposer_loop_thread()
+
+
+class empty(object):
+    pass
 
 
 n = Node(int(sys.argv[1]))
