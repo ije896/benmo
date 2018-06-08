@@ -5,9 +5,9 @@
 # but it still gets stuck in a weird phase, appends duplicate transactions to the queue,
 # and doesn't clear queue after broadcasting decision after load from save
 
-# we also don't handle our error cases for connections. eg, a node crashes, so
-# other connections will be refused and the connection loop crashes, and never really
-# reconnects. So load from crash doesn't really work.
+# UPDATE: duplicate transaction comes from the connection error handling. It fails the connection
+# and then gets stuck in state, doesn't clear queue
+
 
 # Node class
 import queue as q
@@ -96,12 +96,13 @@ class Node:
 
         self.listen_socket = None
 
+        self.active_nodes = [1, 1, 1, 1, 1]
 
 
 
     def startInput(self):
         while (True):
-            action = input('Enter a command (s/p/sc/l): ').lower().strip()
+            action = input('Enter a command (s/p/sc/l/f): ').lower().strip()
             if action=='s':
                 amount = int(input('Enter an amount: ').lower().strip())
                 credit_node = ""
@@ -122,7 +123,18 @@ class Node:
 
             if action=='save':
                 self.save_state()
+            if action=='f':
+                node = int(input('Enter node to disconnect from: ').lower().strip())
+                self.disconnect_from_node(node)
+            if action=='r':
+                node = int(input('Enter node to connect to: ').lower().strip())
+                self.connect_to_node(node)
 
+    def disconnect_from_node(self, node):
+        self.active_nodes[node] = 0
+
+    def connect_to_node(self, node):
+        self.active_nodes[node] = 1
 
     def moneyTransfer(self, amount, credit_node):
         if credit_node == self.id:
@@ -245,16 +257,18 @@ class Node:
         self.latest_round = message.round
 
         # send promise w/o value
-        promise = m.Message(mt.PROMISE, target_id=message.sender_id)
+        promise = m.Message(mt.PROMISE, target_id=message.sender_id, round=message.round)
         # self.send_message(conn, promise)
         self.send_message_to_id(target_id, promise)
 
 
     def rcv_promise(self, conn, message):
         # TODO: If value is appended to promise...
-        if self.proposer_phase == pp.PREPARE:
-            self.promises+=1 # member variable?
+        # TODO: promises gets bumped for every prepare message, regardless of round
+        if self.proposer_phase == pp.PREPARE and message.round == self.proposed_round:
+            self.promises+=1
             if self.promises >= MAJORITY:
+                print('Received majority of promises, moving to accept')
                 # broadcast accept
                 self.proposer_phase = pp.ACCEPT
                 conn.close()
@@ -359,6 +373,7 @@ class Node:
 
     def send_prepare(self):
         # self.latest_round += 1
+        self.promises = 1
         self.proposed_round = self.latest_round + 1
         self.proposed_depth = self.blockchain.depth + 1
         # print(self.proposed_block)
@@ -384,7 +399,7 @@ class Node:
             # if (self.queue_state == qs.NONEMPTY):
             if (not self.queue.empty()):
                 print("\nRestarted proposer loop, id: %d, pphase: %d" % (self.id, self.proposer_phase))
-                if (self.proposer_phase == pp.NONE):
+                if (self.proposer_phase == pp.NONE or self.proposer_phase == pp.PREPARE):
                     self.send_prepare()
             else:
                 print("\nEnding proposer loop")
@@ -420,15 +435,18 @@ class Node:
     def broadcast_message(self, message):
         # for i in range(len(ip_addrs)):
         for i in range(NUM_NODES):
-            if not i == self.id:
+            if not i == self.id and self.active_nodes[i]==1:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.connect((ip_addrs[i], ports[i]))
-                message.target_id = i
-                self.send_message(sock, message)
+                try:
+                    sock.connect((ip_addrs[i], ports[i]))
+                    message.target_id = i
+                    self.send_message(sock, message)
+                except:
+                    print("Node in network may have crashed")
         # print("Broadcast complete")
 
     def updateFromBlock(self, block, depth):
-        print("\nAttempting to update from block: ",block)
+        print("\nAttempting to commit block: ",block)
         print("\nAt depth: %d" % depth)
         self.blockchain.addBlock(block)
         for trans in self.blockchain.blocks[depth]:

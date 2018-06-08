@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+keypair1.pem
+.DS_Store
+
 # C extensions
 *.so
 
