@@ -45,6 +45,7 @@ class Node:
         self.queue = q.Queue(10)
         self.blockchain = Blockchain()
         self.balance = 100
+        self.balance_after_queue = 100
 
         self.ip = ip_addrs[id]
         self.port = ports[id]
@@ -56,8 +57,8 @@ class Node:
         self.acceptor_phase = ap.NONE
 
         # state for proposer phase -- resets after decision is sent
-        self.promises = 0
-        self.acceptances = 0
+        self.promises = 1
+        self.acceptances = 1
         self.proposed_depth = 0
         self.proposed_round = 0
         self.proposed_block = None
@@ -75,27 +76,37 @@ class Node:
 
     def startInput(self):
         while (True):
-            action = input('Enter a command (send/print): ').lower().strip()
-            if action=='send':
+            action = input('Enter a command (s/p/sc): ').lower().strip()
+            if action=='s':
                 amount = int(input('Enter an amount: ').lower().strip())
-                credit_node = input('Enter destination for transaction(1-5): ').lower().strip() # maybe also int for enum?
+                credit_node = ""
+                while (credit_node == ""):
+                    credit_node = int(input('Enter destination for transaction(1-5): ').lower().strip())
+                    if (credit_node not in range(NUM_NODES)):
+                        print("Destination not valid.")
+                        credit_node = ""
                 self.moneyTransfer(amount, credit_node)
-            if action=='print':
+            if action=='p':
                 self.print_all()
-            if action=='safe close':
+            if action=='sc':
                 self.listen_socket.close()
                 exit(0)
 
 
     def moneyTransfer(self, amount, credit_node):
-        if self.balance>amount:
+        if credit_node == self.id:
+            print("Can't send money to self")
+            return
 
-            if self.queue.qsize() == 0:
-                self.queue_state = qs.NONEMPTY
-                self.start_proposer_loop_thread()
+        if self.balance_after_queue>=amount:
+            self.balance_after_queue -= amount
 
             trans = Transaction(amount, self.id, credit_node)
             self.queue.put(trans)
+
+            if self.queue.qsize() == 1:
+                self.queue_state = qs.NONEMPTY
+                self.start_proposer_loop_thread()
         else:
             print("Insufficient funds")
 
@@ -110,9 +121,10 @@ class Node:
         self.print_balance()
         self.print_queue()
         self.print_blockchain()
+        print("\nState of node %d : pp: %d, qp: %d" % (self.id, self.proposer_phase, self.queue_state))
 
     def print_blockchain(self):
-        print("Node blockchain: ", self.blockchain)
+        print("Node blockchain: ", self.blockchain.print())
 
     def print_balance(self):
         print("Node balance: ", self.balance)
@@ -141,8 +153,9 @@ class Node:
             conn, addr = s.accept()
             data = conn.recv(BUFFER_SIZE)
             message = m.decode_message(data)
+
             if message.type == mt.PREPARE:
-                print("received PREPARE from id: %d" % (message.sender_id))
+                print("received PREPARE from id: %d, prop round: %d, prop depth: %d" % (message.sender_id, message.round, message.depth))
                 self.startWorker(self.rcv_prepare, conn, message)
             elif message.type == mt.PROMISE:
                 print("received PROMISE from id: %d" % (message.sender_id))
@@ -173,66 +186,88 @@ class Node:
     """
 
     def rcv_prepare(self, conn, message):
+        target_id = message.sender_id
         if message.round <= self.latest_round:
-            nack = m.Message(mt.NACK, target_id=message.sender_id)
-            self.send_message(conn, nack)
+            nack = m.Message(mt.NACK, target_id=message.sender_id, comment="prepare nack, round is too low")
+            # self.send_message(conn, nack)
+            self.send_message_to_id(target_id, nack)
             return
 
         if message.depth <= self.blockchain.depth:
-            nack = m.Message(mt.NACK, target_id=message.sender_id)
-            self.send_message(conn, nack)
+            nack = m.Message(mt.NACK, target_id=message.sender_id, comment="prepare nack, depth is too low")
+            # self.send_message(conn, nack)
+            self.send_message_to_id(target_id, nack)
             return
 
         if self.accepted_block:
             # send promise with block
             promise = m.Message(mt.PROMISE, target_id=message.sender_id)
-            self.send_message(conn, promise)
+            # self.send_message(conn, promise)
+            self.send_message_to_id(target_id, promise)
             return
 
         self.latest_round = message.round
 
         # send promise w/o value
         promise = m.Message(mt.PROMISE, target_id=message.sender_id)
-        self.send_message(conn, promise)
+        # self.send_message(conn, promise)
+        self.send_message_to_id(target_id, promise)
 
 
     def rcv_promise(self, conn, message):
-        self.promises+=1 # member variable?
-        if self.promises >= MAJORITY:
-            # broadcast accept
-            self.proposer_phase = pp.ACCEPT
-            conn.close()
-            accept = m.Message(mt.ACCEPT)
-            self.broadcast_message(accept)
+        if self.proposer_phase == pp.PREPARE:
+            self.promises+=1 # member variable?
+            if self.promises >= MAJORITY:
+                # broadcast accept
+                self.proposer_phase = pp.ACCEPT
+                conn.close()
+                accept = m.Message(mt.ACCEPT,
+                                sender_id=self.id,
+                                 proposer_id=self.id,
+                                 depth=self.proposed_depth,
+                                 round=self.proposed_round,
+                                 block=self.proposed_block)
+                self.broadcast_message(accept)
 
 
     def rcv_accept(self, conn, message):
-        if message.round <= self.latest_round:
-            nack = m.Message(mt.NACK)
-            self.send_message(conn, nack)
+        target_id = message.sender_id
+        if message.round < self.latest_round:
+            nack = m.Message(mt.NACK, comment="accept nack, round is too low")
+            # self.send_message(conn, nack)
+            self.send_message_to_id(target_id, nack)
             return
 
         if message.depth <= self.blockchain.depth:
-            nack = m.Message(mt.NACK)
-            self.send_message(conn, nack)
+            nack = m.Message(mt.NACK, comment="accept nack, depth is too low")
+            # self.send_message(conn, nack)
+            self.send_message_to_id(target_id, nack)
             return
 
         self.accepted_block = message.block
         # broadcast accepted
         conn.close()
-        accepted = m.Message(mt.ACCEPTED)
+        accepted = m.Message(mt.ACCEPTED,
+                             sender_id=self.id,
+                             proposer_id=message.proposer_id,
+                             depth=message.depth,
+                             round=message.round,
+                             block=message.block
+                             )
         self.broadcast_message(accepted)
 
 
     def rcv_acceptance(self, conn, message):
-        if message.proposer_id == self.id:
+        if message.proposer_id == self.id and self.proposer_phase == pp.ACCEPT:
             self.acceptances += 1
             if self.acceptances >= MAJORITY:
+                print("\nMajority Acceptance; executing decision")
                 self.proposer_phase = pp.DECISION
                 # TODO: implement buffer queue for transactions entered after proposer phase begins
                 self.updateFromBlock(self.proposed_block, self.proposed_depth)
 
                 decision = m.Message(mt.DECISION,
+                                     sender_id=self.id,
                                      proposer_id=self.id,
                                      depth=self.proposed_depth,
                                      round=self.proposed_round,
@@ -242,17 +277,21 @@ class Node:
                 conn.close()
                 self.broadcast_message(decision)
                 self.reset_proposer_state()
+                self.print_all()
 
 
 
     def rcv_decision(self, conn, message):
-        if message.round <= self.latest_round:
-            nack = m.Message(mt.NACK)
-            self.send_message(conn, nack)
+        target_id = message.sender_id
+        if message.round < self.latest_round:
+            nack = m.Message(mt.NACK, comment="decision nack, round is too low")
+            # self.send_message(conn, nack)
+            self.send_message_to_id(target_id, nack)
             return
         if message.depth <= self.blockchain.depth:
-            nack = m.Message(mt.NACK)
-            self.send_message(conn, nack)
+            nack = m.Message(mt.NACK, comment="decision nack, depth is too low")
+            # self.send_message(conn, nack)
+            self.send_message_to_id(target_id, nack)
             return
         self.updateFromBlock(message.block, message.depth)
         self.reset_acceptor_state()
@@ -260,7 +299,7 @@ class Node:
 
 
     def rcv_nack(self, conn, message):
-        print("nack received")
+        print("\nnack received: %s" % message.comment)
         conn.close()
 
     """
@@ -268,14 +307,18 @@ class Node:
     """
 
     def send_prepare(self):
-        print("Sending PREPARE")
         self.proposed_round = self.latest_round + 1
         self.proposed_depth = self.blockchain.depth + 1
+        # print(self.proposed_block)
         self.proposed_block = self.queue_to_list(self.queue)
+        # print(self.proposed_block)
 
         self.proposer_phase = pp.PREPARE
 
+        print("\nSending PREPARE, round: %d, depth: %d" % (self.proposed_round, self.proposed_depth))
+
         prepare = m.Message(mt.PREPARE,
+                            sender_id=self.id,
                             proposer_id=self.id,
                             round=self.proposed_round,
                             depth=self.proposed_depth,
@@ -284,11 +327,15 @@ class Node:
 
 
     def proposer_loop(self):
-        while (self.queue_state == qs.NONEMPTY):
-            if (self.proposer_phase == pp.NONE):
-                self.send_prepare()
+        while (True):
             time.sleep(self.propose_cooldown)
-        return
+            if (self.queue_state == qs.NONEMPTY):
+                print("\nRestarted proposer loop, id: %d, pphase: %d" % (self.id, self.proposer_phase))
+                if (self.proposer_phase == pp.NONE):
+                    self.send_prepare()
+            else:
+                print("\nEnding proposer loop")
+                return
 
     def start_proposer_loop_thread(self):
         thread = Thread(target=self.proposer_loop, args=())
@@ -301,11 +348,17 @@ class Node:
     Utility Methods
     """
 
+    def send_message_to_id(self, target_id, message):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect((ip_addrs[target_id], ports[target_id]))
+        message.target_id = target_id
+        self.send_message(sock, message)
+
     def send_message(self, conn, message):
         message.sender_id = self.id
-        print("\nAttempting message send from %d to %d" % (message.sender_id, message.target_id))
-        print("\n",conn.getsockname())
-        print("\n",conn.getpeername(),"\n")
+        # print("\nAttempting message send from %d to %d" % (message.sender_id, message.target_id))
+        # print("\n",conn.getsockname())
+        # print("\n",conn.getpeername(),"\n")
         message = m.encode_message(message)
         conn.send(message)
         conn.close()
@@ -318,24 +371,27 @@ class Node:
                 sock.connect((ip_addrs[i], ports[i]))
                 message.target_id = i
                 self.send_message(sock, message)
-        print("Broadcast complete")
+        # print("Broadcast complete")
 
     def updateFromBlock(self, block, depth):
+        print("\nAttempting to update from block: ",block)
+        print("\nAt depth: %d" % depth)
         self.blockchain.addBlock(block)
-        for trans in self.blockchain.blocks[depth].transactions:
+        for trans in self.blockchain.blocks[depth]:
             if trans.credit_node == self.id:
                 self.balance+=trans.amount
+                self.balance_after_queue += trans.amount
             if trans.debit_node == self.id:
                 self.balance-=trans.amount
-        pass
 
 
     def reset_proposer_state(self):
-        self.acceptances = 0
-        self.promises = 0
+        self.acceptances = 1
+        self.promises = 1
         self.proposed_block = None
         self.queue = q.Queue()
         self.queue_state = qs.EMPTY
+        self.proposer_phase = pp.NONE
 
     def reset_acceptor_state(self):
         self.accepted_block = None
