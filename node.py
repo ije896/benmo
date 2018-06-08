@@ -132,13 +132,6 @@ class Node:
         else:
             print("Insufficient funds")
 
-    def checkQueuePerUnitTime(self, time_in_seconds):
-        while True:
-            if not self.queue.empty(): # and you're not already in proposal state
-                # start proposal phase
-                pass
-            time.sleep(time_in_seconds)
-
     def print_all(self):
         self.print_balance()
         self.print_queue()
@@ -449,6 +442,7 @@ class Node:
 
     def queue_to_list(self, queue):
         temp_q = q.Queue()
+        # if type(queue)==
         temp_q.queue = copy.deepcopy(queue.queue)
         l = []
         while temp_q.qsize() > 0:
@@ -456,11 +450,6 @@ class Node:
         return l
 
     def save_state(self):
-        # out = []
-        # out.append(self.queue_to_list(self.queue))
-        # out.append(self.blockchain)
-        # out.append(self.balance)
-
         with open(self.fname, 'wb') as w:
           # pickle.dump(out , w)
           pickle.dump(self.output_self_to_object(), w)
@@ -497,29 +486,35 @@ class Node:
 
         obj.queue_state = self.queue_state
 
-        obj.listen_socket = self.listen_socket
+        # obj.listen_socket = self.listen_socket
 
         return obj
 
     def load_from_file(self):
         with open(self.fname, 'rb') as r:
             node_data = pickle.load(r)
-            self.queue = copy.deepcopy(self.list_to_queue(node_data.queue))
-            self.blockchain = node_data.blockchain
-            self.balance = node_data.balance
-            self.balance_after_queue = node_data.balance_after_queue
+            r.close()
+        qu  = self.list_to_queue(node_data.queue)
+        # self.queue = q.Queue()
+        temp = copy.deepcopy(qu.queue)
+        for item in temp:
+            self.queue.put(item)
+        self.blockchain = node_data.blockchain
+        self.balance = node_data.balance
+        self.balance_after_queue = node_data.balance_after_queue
 
-            if (not self.id == node_data.id):
-                print("Node id was not set correctly on init")
-                exit(0)
+        if (not self.id == node_data.id):
+            print("Node id was not set correctly on init")
+            exit(0)
 
-            self.initialize()
+        self.initialize()
+        self.queue_state = node_data.queue_state
 
-            self.startListeningThread()
+        # self.startListeningThread()
 
-            self.proposer_phase = node_data.proposer_phase
-            if (not self.proposer_phase == pp.NONE):
-                self.start_proposer_loop_thread()
+        # self.proposer_phase = node_data.proposer_phase
+        # if (not self.proposer_phase == pp.NONE):
+        self.start_proposer_loop_thread()
 
     def list_to_queue(self, list):
         qu = q.Queue()
